@@ -158,6 +158,10 @@
 /* Build a 1k bootloader, not 512 bytes. This turns on    */
 /* extra functionality.                                   */
 /*                                                        */
+/* BOARD_NAME:                                            */
+/* Set Board Name for assigning pins for flash and radio  */
+/* and to properly set those pins in SPI Init             */
+/*                                                        */
 /* BAUD_RATE:                                             */
 /* Set bootloader baud rate.                              */
 /*                                                        */
@@ -211,6 +215,14 @@
 /**********************************************************/
 /* Edit History:                                          */
 /*                                                        */
+/* May 2019                                               */
+/* 5.0 Humancell: Added ability to specify BOARD_NAME     */
+/*                 - See Makefile                         */
+/*                Added checks for SAB3000 Board          */
+/*                 - Set pins unique to SAB3000           */
+/*                 - Set signature chars per board        */
+/*                Updated SPI Init                        */
+/*                 - split to processor and board ops     */
 /* Mar 2013                                               */
 /* 5.0 WestfW: Major Makefile restructuring.              */
 /*             See Makefile and pin_defs.h                */
@@ -471,20 +483,44 @@ void appStart(uint8_t rstFlags) __attribute__ ((naked));
 #define SPI_2XCLOCK_MASK 0x01  // SPI2X = bit 0 on SPSR
 #define SPI_CLOCK_DIV2 0x04
 
-#if defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega88) || defined(__AVR_ATmega8__) || defined(__AVR_ATmega88__)
+// TODO - All of these should be BOARD_NAME specific, not processor specific?
+//        These all refer to how the flash and radio are connected on a particular board
+#if BOARD_NAME == SAB3000
+  #define FLASHSS_DDR     DDRB
+  #define FLASHSS_PORT    PORTB
+  #define FLASHSS         PINB4
+  #define RADIOSS_DDR     DDRB
+  #define RADIOSS_PORT    PORTB
+  #define RADIOSS         PINB1
+  #define SIG_CHAR_0      'W'
+  #define SIG_CHAR_1      'V'
+  #define SIG_CHAR_2      'N'
+#elif defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega88) || defined(__AVR_ATmega8__) || defined(__AVR_ATmega88__)
   #define FLASHSS_DDR     DDRB
   #define FLASHSS_PORT    PORTB
   #define FLASHSS         PINB0
-  #define SS              PINB2
+  #define RADIOSS_DDR     DDRB
+  #define RADIOSS_PORT    PORTB
+  #define RADIOSS         PINB2
+  #define SIG_CHAR_0      'F'
+  #define SIG_CHAR_1      'L'
+  #define SIG_CHAR_2      'X'
 #elif defined (__AVR_ATmega1284P__) || defined (__AVR_ATmega644P__)
   #define FLASHSS_DDR     DDRC
   #define FLASHSS_PORT    PORTC
   #define FLASHSS         PINC7
-  #define SS              PINB4
+  #define RADIOSS_DDR     DDRB
+  #define RADIOSS_PORT    PORTB
+  #define RADIOSS         PINB4
+  #define SIG_CHAR_0      'F'
+  #define SIG_CHAR_1      'L'
+  #define SIG_CHAR_2      'X'
 #endif
   
 #define FLASH_SELECT   { FLASHSS_PORT &= ~(_BV(FLASHSS)); }
 #define FLASH_UNSELECT { FLASHSS_PORT |= _BV(FLASHSS); }
+#define RADIO_SELECT   { RADIOSS_PORT &= ~(_BV(RADIOSS)); }
+#define RADIO_UNSELECT { RADIOSS_PORT |= _BV(RADIOSS); }
 
 #define SPIFLASH_STATUSWRITE      0x01        // write status register
 #define SPIFLASH_STATUSREAD       0x05        // read status register
@@ -539,18 +575,19 @@ void CheckFlashImage() {
 #endif
   watchdogConfig(WATCHDOG_OFF);
 
-  //SPI INIT
+  //SPI INIT - processor specific first ...
 #if defined(__AVR_ATmega168__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega88) || defined(__AVR_ATmega8__) || defined(__AVR_ATmega88__)
-  DDRB |= _BV(FLASHSS) | _BV(SS) | _BV(PB3) | _BV(PB5); //OUTPUTS for FLASH_SS and SS, MOSI, SCK
-  FLASH_UNSELECT; //unselect FLASH chip
-  PORTB |= _BV(SS); //set SS HIGH
+  DDRB |= _BV(PB3) | _BV(PB5); //OUTPUTS for MOSI, SCK
 #elif defined (__AVR_ATmega1284P__) || defined (__AVR_ATmega644P__)
-  DDRC |= _BV(FLASHSS); //OUTPUT for FLASH_SS
-  DDRB |= _BV(SS) | _BV(PB5) | _BV(PB7); //OUTPUTS for SS, MOSI, SCK
-  FLASH_UNSELECT; //unselect FLASH chip
-  PORTB |= _BV(SS); //set SS HIGH
+  DDRB |= _BV(PB5) | _BV(PB7); //OUTPUTS for MOSI, SCK
 #endif
-  
+
+  //SPI INIT - board specific second ...
+  FLASHSS_DDR |= _BV(FLASHSS);  // OUTPUT for FLASH_SS
+  RADIOSS_DDR |= _BV(RADIOSS);  // OUTPUT for RADIO_SS
+  FLASH_UNSELECT;               // unselect FLASH chip
+  RADIO_UNSELECT;               // unselect RADIO chip (NSS HIGH)
+
   //SPCR &= ~(_BV(DORD)); //MSB first
   //SPCR = (SPCR & ~SPI_MODE_MASK) | SPI_MODE0 ; //SPI MODE 0
   //SPCR = (SPCR & ~SPI_CLOCK_MASK) | (SPI_CLOCK_DIV2 & SPI_CLOCK_MASK); //clock divider = 2
@@ -572,7 +609,8 @@ void CheckFlashImage() {
   FLASH_UNSELECT;
   
   //check if any flash image exists on external FLASH chip
-  if (FLASH_readByte(0)=='F' && FLASH_readByte(1)=='L' && FLASH_readByte(2)=='X' && FLASH_readByte(6)==':' && FLASH_readByte(9)==':')
+  //  SIG_CHAR_0-2 set above on a per board basis
+  if (FLASH_readByte(0)==SIG_CHAR_0 && FLASH_readByte(1)==SIG_CHAR_1 && FLASH_readByte(2)==SIG_CHAR_2 && FLASH_readByte(6)==':' && FLASH_readByte(9)==':')
   {
 #ifdef DEBUG_ON
     putch('L');

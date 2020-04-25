@@ -17,6 +17,9 @@
 # etc...
 #
 # Edit History
+# 20190521: Humancell:  Modifying to allow a BOARD_NAME to be passed in
+#                       for setting the pins for the flash chip and radio
+#
 # 201303xx: WestfW: Major Makefile restructuring.
 #                   Allows options on Make command line "make xx LED=B3"
 #                   (see also pin_defs.h)
@@ -64,7 +67,7 @@ ifeq ($(ENV), arduino)
 # For Arduino, we assume that we're connected to the optiboot directory
 # included with the arduino distribution, which means that the full set
 # of avr-tools are "right up there" in standard places.
-TOOLROOT = ../../../tools
+TOOLROOT = ../../../../tools
 GCCROOT = $(TOOLROOT)/avr/bin/
 
 ifeq ($(OS), windows)
@@ -127,6 +130,15 @@ SIZE           = $(GCCROOT)avr-size
 # appropriate parameters ("-DLED_START_FLASHES=10") to gcc
 #
 
+ifdef BOARD_NAME
+BOARD_NAME_CMD = -DBOARD_NAME=$(BOARD_NAME)
+dummy = FORCE
+else
+# TODO change this to require the BOARD_NAME always ... test if it is not set!
+# https://stackoverflow.com/questions/10858261/abort-makefile-if-variable-not-set
+BOARD_NAME_CMD = -DBOARD_NAME=UNKNOWN
+endif
+
 ifdef BAUD_RATE
 BAUD_RATE_CMD = -DBAUD_RATE=$(BAUD_RATE)
 dummy = FORCE
@@ -168,6 +180,7 @@ endif
 
 COMMON_OPTIONS = $(BAUD_RATE_CMD) $(LED_START_FLASHES_CMD) $(BIGBOOT_CMD)
 COMMON_OPTIONS += $(SOFT_UART_CMD) $(LED_DATA_FLASH_CMD) $(LED_CMD) $(SSCMD)
+COMMON_OPTIONS += $(BOARD_NAME_CMD)
 
 #UART is handled separately and only passed for devices with more than one.
 ifdef UART
